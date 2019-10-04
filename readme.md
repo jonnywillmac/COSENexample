@@ -249,11 +249,11 @@ With this complete we can now look to create our action.
 ## Creating the Action
 Now we have the function code and container within which it should be ran, it’s straightforward to create the action.  Format of the cli command is as follows
 
-`ibmcloud fn action create cosProbe /<path to your folder>/COSEVexample/generateVideoMetadata.py —docker <dockername>/<image name>`
+`ibmcloud fn action create cosProbe /<path to your folder>/COSEVexample/generateVideoMetadata.py --docker <dockername>/<image name>`
 
 This uses default  for all parameters and run in the resource group and namespace set in previous step.  So for my example, to create the action the command is
 
-`ibmcloud fn action update cosProbe ~/Code/Python/COSEVexample/generateVideoMetadata.py —docker jonnywillmac/python_ibm_runtime`
+`ibmcloud fn action update cosProbe ~/Code/Python/COSEVexample/generateVideoMetadata.py --docker jonnywillmac/python_ibm_runtime`
 
 Confirm everything is configured as expected with
 
@@ -261,10 +261,10 @@ Confirm everything is configured as expected with
 
 ```
 Entities in namespace: **default**
-**packages**
-**actions**
+packages
+actions
 /634a6745-2596-497e-8f99-b1b23e4eec5b/cosProbe                         private blackbox
-**triggers**
+triggers
 /634a6745-2596-497e-8f99-b1b23e4eec5b/cosTrigger                       private
 ```
 

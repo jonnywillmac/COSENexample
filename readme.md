@@ -151,9 +151,213 @@ The code to run here is relatively simple and there a number of languages that I
 
 Rather than go into detail on the code itself in this case I’m going to simply provide a GitHub link.  This includes the commented python function we’ll use and also the Dockerfile that we’re using in the next step.
 
+The repo is here [GitHub - jonnywillmac/COSENexample](https://github.com/jonnywillmac/COSENexample)
+
+[generateVideoMetadata.py](https://github.com/jonnywillmac/COSENexample/blob/master/generateVideoMetadata.py) - is the file we’ll use when we create our action.
 
 ## Creating a container with ffprobe support
-## Creating the Action
- fn service bind cloud-object-storage cosProbe
-ibmcloud fn action update cosProbe ~/Code/Python/COSEVexample/generateVideoMetadata.py —docker jonnywillmac/python_ibm_runtime
+As previously discussed, if the standard runtimes we have available don’t quite meet our requirements, we can create our own container that does.   If you’re not interested in this step, or simply don’t have docker available on your system and an account, then you can move straight to creating the action. 
 
+### Verify docker is installed and configured
+Before continuing ensure that docker is installed and functioning.  A simple way to test this is with the hello-world container.  Simply run the following and ensure it completes correctly.
+
+You should see the following if so we’re ready to go!
+
+```
+$ docker run hello-world
+Unable to find image ‘hello-world:latest’ locally
+latest: Pulling from library/hello-world
+1b930d010525: Pull complete 
+Digest: sha256:b8ba256769a0ac28dd126d584e0a2011cd2877f3f76e093a7ae560f2a5301c00
+Status: Downloaded newer image for hello-world:latest
+
+Hello from Docker!
+This message shows that your installation appears to be working correctly.
+........
+```
+
+### Build our new container
+IBM make it simple to build bespoke container.  There are base containers available specifically for this purpose.  In this case as I’m planning use python3 as will base my container on this image.
+
+[ibmfunctions/action-python-v3.7](https://hub.docker.com/r/ibmfunctions/action-python-v3.7)
+
+This container is built and ready to work with our action and contains the python 3 runtime environment.  All we need to do is add into this the ffprobe binary (part of the ffmpeg suite) and ensure that the cos python SDK’s are installed.  We do this using a Dockerfile which defines the steps to build our own container (based on the IBM one).
+
+The Dockerfile looks like this
+
+```
+# Start with this container as the base
+FROM ibmfunctions/action-python-v3.7
+
+# add package build dependencies
+RUN apt update
+RUN apt install -y \
+        ffmpeg
+
+# add python packages
+RUN pip3 install --upgrade pip
+RUN pip3 install \
+    ibm_cos_sdk
+```
+
+As you can see the steps are simple:
+
+* Take the IBM base image
+* Ensure the packages within are up to date
+* Install ffmpeg (and any dependencies)
+* Upgrade and run pip to install the IBM COS SDK
+
+All we need to do is save this in a file called Dockerfile and cd into the folder containing it.  If you’re using the repo then the Dockerfile is part of this.  We also need to name the image in my case it’s called jonnywillmac/python_ibm_runtime this first part should match your docker user name (if using a Docker registry).  This is important so that when we push the image it’s uploaded to your registry ready for public use.  The command to build our container is then
+
+`docker build -t <dockername>/<image name> .`
+
+So for my example
+
+`docker build -t jonnywillmac/python_ibm_runtime .`
+
+You will see the correct images pulled and then the output as the steps we defined in the Dockerfile are carried out.  There will be a few warnings but should be no errors.
+
+```
+docker build -t jonnywillmac/python_ibm_runtime .
+Sending build context to Docker daemon    108kB
+Step 1/5 : FROM ibmfunctions/action-python-v3.7
+ —> bd733161ee54
+Step 2/5 : RUN apt update
+ —> Running in 983f14d614c2
+...
+```
+
+Finally we need to push the image to the docker registry so it can be used in our action
+
+`docker push jonnywillmac/python_ibm_runtime`
+
+```
+$ docker push jonnywillmac/python_ibm_runtime
+The push refers to repository [docker.io/jonnywillmac/python_ibm_runtime]
+8053c0a99dae: Pushed 
+023423d42f78: Pushed 
+f090a220f4bf: Pushed 
+381f99918f39: Pushed 
+aec0068407cf: Mounted from ibmfunctions/action-python-v3.7 
+8fcf91f2ffb1: Mounted from ibmfunctions/action-python-v3.7 
+...
+```
+
+With this complete we can now look to create our action.
+
+
+## Creating the Action
+Now we have the function code and container within which it should be ran, it’s straightforward to create the action.  Format of the cli command is as follows
+
+`ibmcloud fn action create cosProbe /<path to your folder>/COSEVexample/generateVideoMetadata.py —docker <dockername>/<image name>`
+
+This uses default  for all parameters and run in the resource group and namespace set in previous step.  So for my example, to create the action the command is
+
+`ibmcloud fn action update cosProbe ~/Code/Python/COSEVexample/generateVideoMetadata.py —docker jonnywillmac/python_ibm_runtime`
+
+Confirm everything is configured as expected with
+
+`ibmcloud fn list`
+
+```
+Entities in namespace: **default**
+**packages**
+**actions**
+/634a6745-2596-497e-8f99-b1b23e4eec5b/cosProbe                         private blackbox
+**triggers**
+/634a6745-2596-497e-8f99-b1b23e4eec5b/cosTrigger                       private
+```
+
+## Binding credentials to our action
+Earlier in this tutorial we created service credentials for our COS service.  This allows us to gain access to the bucket from within our function.  However, we don’t want to directly embed these credentials into the function as this would be a security risk.  Invariably when I’ve experimented with code and embedded credentials into it they always seem to end up in a GitHub repo no matter how many times I’ve made this mistake!  I’ve found the best way to avoid this is to avoid any kind of credentials being explicit in my code.
+
+This means we need our functions service to retrieve the credentials for us.  For this to happen we need to “bind” the creds to our action.  Use the following taking not of your instance name and service key name.
+
+```
+ibmcloud fn service bind cloud-object-storage cosProbe \
+--instance COS --keyname COSserviceKey
+```
+
+## Creating a Rule
+The final step in the process is to link the trigger and the action.  Basically something which say when this happens - do this.  This is called a rule and is a simple to create as it sounds.
+
+`ibmcloud fn rule create <Rule Name> <Trigger Name> <Action Name>`
+
+So for our example 
+
+`ibmcloud fn rule create cosRule cosTrigger cosProbe`
+
+`ok: created rule **cosRule**`
+
+With this in place our example workflow should be ready to test.  To make sure run `ibmcloud fn list` output should be similar to mine.
+
+```
+Entities in namespace: default
+packages
+actions
+/634a6745-2596-497e-8f99-b1b23e4eec5b/cosProbe                         private blackbox
+triggers
+/634a6745-2596-497e-8f99-b1b23e4eec5b/cosTrigger                       private
+rules
+/634a6745-2596-497e-8f99-b1b23e4eec5b/cosRule                          private              active
+```
+
+## Testing the solution
+To verify this is working as intended you’ll need a video file with an mp4 extension. Just a google of “open source video sample” gave me a couple of websites where it’s easy to download some example if you don’t have anything local.
+
+### Upload video to COS bucket
+We’ve already configured the cli so that it can access the COS bucket.  So to add the video file run the following command:
+
+```
+ibmcloud cos upload --bucket placetouploadvideo --key video.mp4 --file video.mp4
+```
+
+Make sure to update this to reflect the name of your bucket.  The key is the object name and the file is the path to your sample video file you’re using.  This should be the result
+
+```
+$ ibmcloud cos upload —bucket placetouploadvideo —key video.mp4 —file video.mp4
+	**OK**
+Successfully uploaded object ‘**video.mp4**’ to bucket ‘**placetouploadvideo**’.
+```
+
+### List Activations
+With our object uploaded we need to verify the activation has been triggered and the rule and action ran.  The place to check this is within the list of activations - as with all the steps take here this can be done via CLI or UI.  The CLI command to verify what activations have taken place is.
+
+`ibmcloud fn activation list`
+
+You should see an output similar to this
+
+```
+**Datetime            Activation ID                    Kind      Start Duration   Status            Entity**
+2019-10-04 09:59:53 3484a2d3fe0847dd84a2d3fe0867dd49 blackbox  cold  2.068s     success           634a6745-2…e4eec5b/cosProbe:0.0.16
+2019-10-04 09:59:52 94fdf406e4d14003bdf406e4d10003df unknown   warm  0s         success           634a6745-2…e4eec5b/cosTrigger:0.0.1
+```
+
+You can see from the above that the first entry details the trigger being activated.  The second is the cosProbe function then being ran for the event.  You can see more detail on this with the commands
+
+```
+ibmcloud fn activation result  <Activation ID>
+```
+
+Assuming successful this should output the metadata we’ve written to the Object Store.
+
+### List Objects
+Finally to confirm we have what we need we can list the contents of the object store again you can browse through the UI at cloud.ibm.com to do this.  Do list the objects in our bucket you can use a command similar to this
+
+```
+$ ibmcloud cos list-objects --bucket placetouploadvideo
+**OK**
+Found 2 objects in bucket ‘**placetouploadvideo**’:
+
+**Name**                      **Last Modified**              **Object Size**   
+**metadata/video.mp4.meta**   Oct 04, 2019 at 08:59:55   2.38 KiB   
+**video.mp4**                 Oct 04, 2019 at 08:59:48   26.59 MiB 
+```
+
+## Conclusion
+So hopefully you’ve been able to work through this example and get a feel for how easy it is to make something useful with Event Notifications and Cloud Functions.
+
+Much more detail is available at https://cloud.ibm.com in our documentation.   I recommend you check out the following links.
+
+[IBM Cloud Object Storage](https://cloud.ibm.com/docs/cloud-object-storage)
+[IBM Cloud Functions](https://cloud.ibm.com/docs/openwhisk)
